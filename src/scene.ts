@@ -1,16 +1,18 @@
 import {
   ACESFilmicToneMapping, CanvasTexture, Color, DirectionalLight,
   Fog, Group, HemisphereLight, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial,
-  PerspectiveCamera, PlaneGeometry, PMREMGenerator, QuadraticBezierCurve3, RingGeometry,
+  PerspectiveCamera, PlaneGeometry, PMREMGenerator, QuadraticBezierCurve3,
   Scene, SphereGeometry, SRGBColorSpace, TubeGeometry, Vector3, WebGLRenderer,
 } from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { meltShape } from './session.ts';
 import { IceGeometry } from './ice-geometry.ts';
+import { WaterPuddle } from './water.ts';
 
 export function createIceScene(container: HTMLElement, onFailure: () => void) {
+  const designCapture = location.hash.includes('figmacapture=');
   const mobile = window.matchMedia('(max-width: 640px)').matches;
-  const renderer = new WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' });
+  const renderer = new WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power', preserveDrawingBuffer: designCapture });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobile ? 1.5 : 2));
   renderer.outputColorSpace = SRGBColorSpace;
   renderer.toneMapping = ACESFilmicToneMapping;
@@ -95,42 +97,42 @@ export function createIceScene(container: HTMLElement, onFailure: () => void) {
     ice.add(new Mesh(new TubeGeometry(path, 12, 0.0035, 3, false), fractureMaterial));
   }
 
-  const waterMaterial = new MeshPhysicalMaterial({ color: 0x80a6b5, roughness: 0.09, transmission: 0.65, thickness: 0.08, ior: 1.333, transparent: true, opacity: 0.72, metalness: 0.05, envMapIntensity: 0.65, depthWrite: false });
-  const water = new Mesh(new SphereGeometry(1, 64, 16), waterMaterial);
-  water.position.set(0.12, 0, 0.1);
-  water.rotation.y = 0.3;
+  const water = new WaterPuddle(mobile);
   scene.add(water);
-  const edgeMaterial = new MeshBasicMaterial({ color: 0xa1c1ca, transparent: true, opacity: 0.07, depthWrite: false });
-  const waterEdge = new Mesh(new RingGeometry(0.992, 1, 80), edgeMaterial);
-  waterEdge.rotation.x = -Math.PI / 2;
-  waterEdge.position.copy(water.position);
-  waterEdge.position.y = 0.012;
-  scene.add(waterEdge);
 
   let disposed = false;
   let failed = false;
   let lastProgress = -1;
+  let lastSeed = '';
+  let lastScale = 1;
   let requested = 0;
   function draw() {
     requested = 0;
-    if (disposed || failed || document.hidden) return;
-    try { renderer.render(scene, camera); }
+    if (disposed || failed || (document.hidden && !designCapture)) return;
+    try {
+      scene.updateMatrixWorld();
+      camera.updateMatrixWorld();
+      water.renderReflection(renderer, scene, camera);
+      renderer.render(scene, camera);
+    }
     catch { failed = true; onFailure(); }
   }
   function requestDraw() { if (!requested && !disposed && !failed) requested = requestAnimationFrame(draw); }
-  function update(progress: number) {
+  function update(progress: number, seed = 'preview', initialScale = 1) {
     const p = Math.max(0, Math.min(1, progress));
-    if (Math.abs(lastProgress - p) < 0.00001) return;
+    if (Math.abs(lastProgress - p) < 0.00001 && seed === lastSeed && initialScale === lastScale) return;
     const shape = meltShape(p);
     geometry.updateMelt(p);
     lastProgress = p;
+    lastSeed = seed;
+    lastScale = initialScale;
     ice.visible = p < 1;
-    ice.scale.set(shape.scale, shape.scale * (1 - p * 0.15), shape.scale);
-    ice.position.y = shape.scale * (1 - p * 0.15) + 0.015;
-    const radius = 1.05 + shape.water * 1.25;
-    water.scale.set(radius, 0.018 + p * 0.015, radius * 0.76);
-    waterEdge.scale.set(radius, radius * 0.76, 1);
-    shadow.scale.setScalar(Math.max(0.1, shape.scale));
+    const scaled = shape.scale * initialScale;
+    ice.scale.set(scaled, scaled * (1 - p * 0.15), scaled);
+    ice.position.y = scaled * (1 - p * 0.15) + 0.015;
+    const radius = (1.05 + shape.water * 1.25) * initialScale;
+    water.updateMelt(p, radius, seed);
+    shadow.scale.setScalar(Math.max(0.1, scaled));
     requestDraw();
   }
   function resize() {
@@ -171,7 +173,9 @@ export function createIceScene(container: HTMLElement, onFailure: () => void) {
         }
       });
       geometries.forEach(g => g.dispose());
+      for (const mat of Array.isArray(water.material) ? water.material : [water.material]) materials.delete(mat);
       materials.forEach(m => m.dispose());
+      water.dispose();
       shadowTexture.dispose();
       environment.dispose();
       renderer.dispose();

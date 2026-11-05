@@ -1,19 +1,37 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSession, advance, pause, resume, stop, elapsed, validateMinutes, randomMinutes, meltShape } from '../src/session.ts';
+import { createSession, advance, pause, resume, stop, elapsed, validateMinutes, challengeMinutes, createIceSession, validateIceSize, validateTemperature, meltShape } from '../src/session.ts';
 
-test('rejects invalid minute inputs and reversed ranges', () => {
+test('rejects invalid minute inputs', () => {
   for (const value of ['', ' ', 'abc', '0', '-2', '1.5', '721', 'Infinity']) {
     assert.throws(() => validateMinutes(value));
   }
   assert.equal(validateMinutes('720'), 720);
-  assert.throws(() => randomMinutes(90, 30));
 });
 
-test('random range includes both endpoints and equal bounds', () => {
-  assert.equal(randomMinutes(30, 90, () => 0), 30);
-  assert.equal(randomMinutes(30, 90, () => 0.9999999), 90);
-  assert.equal(randomMinutes(40, 40, () => 0.4), 40);
+test('ice size and temperature determine study time with bounded variation', () => {
+  assert.equal(challengeMinutes(3, 22, () => 0.5), 50);
+  assert.equal(challengeMinutes(3, 22, () => 0), 45);
+  assert.equal(challengeMinutes(3, 22, () => 1), 55);
+  assert.ok(challengeMinutes(5, 22, () => 0.5) > challengeMinutes(2, 22, () => 0.5));
+  assert.ok(challengeMinutes(3, 10, () => 0.5) > challengeMinutes(3, 35, () => 0.5));
+  assert.equal(challengeMinutes(2, 35, () => 0), 19);
+  assert.equal(challengeMinutes(5, 10, () => 1), 202);
+});
+
+test('invalid physical settings cannot create a challenge', () => {
+  for (const size of ['', '1.5', '5.5', '2.3', 'NaN', '2e0']) assert.throws(() => validateIceSize(size));
+  for (const temperature of ['', '0', '9', '36', '22.5', 'Infinity']) assert.throws(() => validateTemperature(temperature));
+  assert.equal(validateIceSize('2.5'), 2.5);
+  assert.equal(validateTemperature('22'), 22);
+});
+
+test('a physical challenge retains its conditions and sampled duration during pause', () => {
+  const session = createIceSession({ sizeCm: 4, temperatureC: 20 }, 1_000, 'ice', () => 0.5);
+  assert.equal(session.mode, 'random');
+  assert.deepEqual(session.ice, { sizeCm: 4, temperatureC: 20 });
+  assert.equal(session.targetMs, 73 * 60_000);
+  assert.deepEqual(resume(pause(session, 11_000), 99_000).ice, session.ice);
 });
 
 test('wall-clock elapsed time survives background throttling and caps at target', () => {

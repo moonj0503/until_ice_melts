@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSession, pause, advance } from '../src/session.ts';
+import { createSession, createIceSession, pause, advance } from '../src/session.ts';
 import { loadState, persistState, reconcile, freshState, STORAGE_KEY } from '../src/storage.ts';
 
 function memory() {
@@ -73,4 +73,26 @@ test('unrepresentable dates in persisted data cannot crash history rendering', (
   const result = loadState(storage, 80_000);
   assert.equal(result.state.records.length, 0);
   assert.ok(result.warning);
+});
+
+test('legacy min/max settings migrate without losing active sessions or records', () => {
+  const storage = memory();
+  const session = pause(createSession('random', 47, 1_000, 'legacy'), 11_000);
+  const record = advance(createSession('fixed', 1, 0, 'history'), 61_000);
+  storage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, session, records: [record], settings: { mode: 'random', sound: true, fixed: 40, min: 30, max: 90 } }));
+  const restored = loadState(storage, 111_000);
+  assert.equal(restored.warning, '');
+  assert.equal(restored.state.session?.targetMs, 47 * 60_000);
+  assert.equal(restored.state.session?.status, 'paused');
+  assert.equal(restored.state.records.length, 1);
+  assert.deepEqual(restored.state.settings, { mode: 'random', sound: true, fixed: 40, sizeCm: 3, temperatureC: 22 });
+});
+
+test('physical challenge conditions and time survive reload without resampling', () => {
+  const storage = memory();
+  const state = { ...freshState(), session: createIceSession({ sizeCm: 4, temperatureC: 20 }, 1_000, 'physical', () => 0.5) };
+  persistState(storage, state);
+  const restored = loadState(storage, 99_000).state;
+  assert.deepEqual(restored.session?.ice, { sizeCm: 4, temperatureC: 20 });
+  assert.equal(restored.session?.targetMs, 73 * 60_000);
 });

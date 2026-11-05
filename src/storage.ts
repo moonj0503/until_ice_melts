@@ -3,12 +3,12 @@ import type { Mode, Session } from './session.ts';
 
 export const STORAGE_KEY = 'until-ice-melts:v1';
 
-export interface Settings { sound: boolean; mode: Mode; fixed: number; min: number; max: number }
+export interface Settings { sound: boolean; mode: Mode; fixed: number; sizeCm: number; temperatureC: number }
 export interface AppState { version: 1; session: Session | null; records: Session[]; settings: Settings }
 export interface StoragePort { getItem(key: string): string | null; setItem(key: string, value: string): void }
 
 export function freshState(): AppState {
-  return { version: 1, session: null, records: [], settings: { sound: false, mode: 'fixed', fixed: 50, min: 30, max: 90 } };
+  return { version: 1, session: null, records: [], settings: { sound: false, mode: 'fixed', fixed: 50, sizeCm: 3, temperatureC: 22 } };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -19,6 +19,11 @@ function nonnegative(value: unknown): value is number {
 }
 function timestamp(value: unknown): value is number {
   return nonnegative(value) && value <= 8_640_000_000_000_000;
+}
+function validIce(value: unknown): boolean {
+  return isObject(value) && typeof value.sizeCm === 'number' && value.sizeCm >= 2 && value.sizeCm <= 5
+    && Number.isInteger(value.sizeCm * 2) && typeof value.temperatureC === 'number'
+    && Number.isInteger(value.temperatureC) && value.temperatureC >= 10 && value.temperatureC <= 35;
 }
 function validSession(value: unknown): value is Session {
   if (!isObject(value)) return false;
@@ -32,13 +37,23 @@ function validSession(value: unknown): value is Session {
     && nonnegative(value.elapsedMs) && value.elapsedMs <= value.targetMs
     && (active ? timestamp(value.runningSince) : value.runningSince === null)
     && (finished ? timestamp(value.finishedAt) : value.finishedAt === null)
-    && (value.status !== 'completed' || value.elapsedMs === value.targetMs);
+    && (value.status !== 'completed' || value.elapsedMs === value.targetMs)
+    && (value.ice === undefined || (value.mode === 'random' && validIce(value.ice)));
 }
 function validSettings(value: unknown): value is Settings {
   if (!isObject(value)) return false;
   return typeof value.sound === 'boolean' && (value.mode === 'fixed' || value.mode === 'random')
-    && [value.fixed, value.min, value.max].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 720)
-    && Number(value.min) <= Number(value.max);
+    && typeof value.fixed === 'number' && Number.isInteger(value.fixed) && value.fixed >= 1 && value.fixed <= 720
+    && validIce(value);
+}
+function migrateLegacySettings(value: unknown): unknown {
+  if (!isObject(value) || !isObject(value.settings)) return value;
+  const s = value.settings;
+  if (s.sizeCm !== undefined || s.temperatureC !== undefined) return value;
+  if (![s.min, s.max].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 720)
+    || Number(s.min) > Number(s.max)) return value;
+  // Preserve old timers and history exactly; only replace the obsolete inputs.
+  return { ...value, settings: { sound: s.sound, mode: s.mode, fixed: s.fixed, sizeCm: 3, temperatureC: 22 } };
 }
 function validState(value: unknown): value is AppState {
   return isObject(value) && value.version === 1 && (value.session === null || validSession(value.session))
@@ -60,7 +75,7 @@ export function loadState(storage: StoragePort, now: number): { state: AppState;
   try {
     const raw = storage.getItem(STORAGE_KEY);
     if (raw === null) return { state: freshState(), warning: '' };
-    const data: unknown = JSON.parse(raw);
+    const data: unknown = migrateLegacySettings(JSON.parse(raw));
     if (!validState(data)) throw new Error('invalid state');
     return { state: reconcile(data, now), warning: '' };
   } catch {

@@ -1,5 +1,6 @@
 export type Mode = 'fixed' | 'random';
 export type Status = 'running' | 'paused' | 'completed' | 'stopped';
+export interface IceConditions { sizeCm: number; temperatureC: number }
 
 export interface Session {
   id: string;
@@ -10,6 +11,7 @@ export interface Session {
   runningSince: number | null;
   elapsedMs: number;
   finishedAt: number | null;
+  ice?: IceConditions;
 }
 
 export function validateMinutes(value: string): number {
@@ -21,11 +23,36 @@ export function validateMinutes(value: string): number {
   return minutes;
 }
 
-export function randomMinutes(min: number, max: number, random = Math.random): number {
-  validateMinutes(String(min));
-  validateMinutes(String(max));
-  if (min > max) throw new Error('최대 시간은 최소 시간보다 크거나 같아야 해요.');
-  return min + Math.floor(Math.min(1 - Number.EPSILON, Math.max(0, random())) * (max - min + 1));
+export function validateIceSize(value: string): number {
+  const size = Number(value);
+  if (!/^\d+(?:\.\d+)?$/.test(value.trim()) || !Number.isFinite(size) || size < 2 || size > 5 || !Number.isInteger(size * 2)) {
+    throw new Error('얼음 크기는 2~5cm 사이에서 0.5cm 단위로 정해 주세요.');
+  }
+  return size;
+}
+
+export function validateTemperature(value: string): number {
+  const temperature = Number(value);
+  if (!/^\d+$/.test(value.trim()) || !Number.isInteger(temperature) || temperature < 10 || temperature > 35) {
+    throw new Error('주변 온도는 10~35°C 사이의 정수로 정해 주세요.');
+  }
+  return temperature;
+}
+
+/** Calibrated study simulation: larger cubes take longer, warmer air melts faster.
+ *  3cm at 22°C is centered on 50 minutes, with +/-10% session variation.
+ *  This deliberately omits real-world airflow, humidity and container physics.
+ */
+export function challengeMinutes(sizeCm: number, temperatureC: number, random = Math.random): number {
+  validateIceSize(String(sizeCm));
+  validateTemperature(String(temperatureC));
+  const variation = Math.max(0, Math.min(1, random()));
+  if (!Number.isFinite(variation)) throw new Error('공부 시간을 정하지 못했어요. 다시 시도해 주세요.');
+  return Math.round(50 * (sizeCm / 3) * (22 / temperatureC) * (0.9 + variation * 0.2));
+}
+
+export function createIceSession(ice: IceConditions, now: number, id: string, random = Math.random): Session {
+  return { ...createSession('random', challengeMinutes(ice.sizeCm, ice.temperatureC, random), now, id), ice: { ...ice } };
 }
 
 export function createSession(mode: Mode, minutes: number, now: number, id: string): Session {

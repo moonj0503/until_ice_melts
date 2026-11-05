@@ -1,5 +1,5 @@
 import './style.css';
-import { createSession, elapsed, formatTime, pause, randomMinutes, resume, stop, validateMinutes } from './session.ts';
+import { createSession, createIceSession, elapsed, formatTime, pause, resume, stop, validateMinutes, validateIceSize, validateTemperature } from './session.ts';
 import { loadState, persistState, reconcile, STORAGE_KEY } from './storage.ts';
 import type { Mode, Session } from './session.ts';
 import { CompletionSound } from './audio.ts';
@@ -17,18 +17,18 @@ const port = {
 const restored = loadState(port, Date.now());
 let state = restored.state;
 let storageWarning = restored.warning;
-let scene: { update(progress: number): void; dispose(): void } | null = null;
+let scene: { update(progress: number, seed?: string, initialScale?: number): void; dispose(): void } | null = null;
 let lastStatus = '';
 const sound = new CompletionSound();
 const form = element<HTMLFormElement>('study-form');
 const fixedInput = element<HTMLInputElement>('fixed-minutes');
-const minInput = element<HTMLInputElement>('min-minutes');
-const maxInput = element<HTMLInputElement>('max-minutes');
+const sizeInput = element<HTMLInputElement>('ice-size');
+const temperatureInput = element<HTMLInputElement>('air-temperature');
 const soundToggle = element<HTMLInputElement>('sound-toggle');
 const dialog = element<HTMLDialogElement>('history-dialog');
 fixedInput.value = String(state.settings.fixed);
-minInput.value = String(state.settings.min);
-maxInput.value = String(state.settings.max);
+sizeInput.value = String(state.settings.sizeCm);
+temperatureInput.value = String(state.settings.temperatureC);
 soundToggle.checked = state.settings.sound;
 
 function persist() {
@@ -49,14 +49,26 @@ function setMode(mode: Mode) {
   element('fixed-fields').hidden = mode !== 'fixed';
   element('random-fields').hidden = mode !== 'random';
   element('time-help').textContent = mode === 'random'
-    ? '범위 안에서 정해진 종료 시간은 비밀이에요.' : '1~720분 사이에서 정해 주세요.';
+    ? '큰 얼음일수록, 주변 온도가 낮을수록 천천히 녹아요.' : '1~720분 사이에서 정해 주세요.';
   element('form-error').hidden = true;
-  [fixedInput, minInput, maxInput].forEach(input => input.removeAttribute('aria-invalid'));
+  [fixedInput, sizeInput, temperatureInput].forEach(input => input.removeAttribute('aria-invalid'));
+}
+
+function previewScale(): number {
+  if (state.settings.mode !== 'random') return 1;
+  try { return Math.cbrt(validateIceSize(sizeInput.value) / 3); }
+  catch { return Math.cbrt(state.settings.sizeCm / 3); }
 }
 
 function render(now = Date.now()) {
+  element('ice-size-value').textContent = `${sizeInput.value} cm`;
+  element('temperature-value').textContent = `${temperatureInput.value} °C`;
+  sizeInput.setAttribute('aria-valuetext', `${sizeInput.value} cm`);
+  temperatureInput.setAttribute('aria-valuetext', `${temperatureInput.value} °C`);
   const session = state.session;
   const status = session?.status ?? 'setup';
+  document.body.dataset.status = status;
+  document.body.dataset.mode = state.settings.mode;
   element('setup-panel').hidden = !!session;
   element('active-panel').hidden = !session;
   const done = status === 'completed' || status === 'stopped';
@@ -75,13 +87,15 @@ function render(now = Date.now()) {
     element('elapsed').textContent = formatTime(ms);
     element('session-label').textContent = done ? '공부한 시간' : session.mode === 'random' ? '랜덤 챌린지' : '집중한 시간';
     element('pause-session').textContent = status === 'paused' ? '다시 집중하기' : '잠깐 쉬기';
-    element('session-hint').textContent = status === 'paused' ? '준비되면 다시 이어가요.'
-      : status === 'completed' ? '오늘의 집중이 기록에 더해졌어요.'
-      : status === 'stopped' ? '다음에 다시, 한 조각부터.'
+    const sessionHint = status === 'paused' ? '준비되면 다시 이어가요.'
+      : done ? ''
+      : session.ice ? `얼음 ${session.ice.sizeCm}cm · 주변 ${session.ice.temperatureC}°C`
       : session.mode === 'random' ? '언제 끝날지는 몰라도, 지금의 집중은 쌓이고 있어요.'
-      : '얼음이 녹는 동안, 공부에 집중해요.';
-    scene?.update(ms / session.targetMs);
-  } else scene?.update(0);
+      : '';
+    element('session-hint').textContent = sessionHint;
+    element('session-hint').hidden = !sessionHint;
+    scene?.update(ms / session.targetMs, session.id, session.ice ? Math.cbrt(session.ice.sizeCm / 3) : 1);
+  } else scene?.update(0, 'preview', previewScale());
 
   element('sound-state').textContent = state.settings.sound ? '켜짐' : '꺼짐';
   soundToggle.checked = state.settings.sound;
@@ -129,14 +143,14 @@ form.addEventListener('submit', event => {
   try {
     const mode = state.settings.mode;
     const fixed = mode === 'fixed' ? validateMinutes(fixedInput.value) : state.settings.fixed;
-    const min = mode === 'random' ? validateMinutes(minInput.value) : state.settings.min;
-    const max = mode === 'random' ? validateMinutes(maxInput.value) : state.settings.max;
-    const duration = mode === 'fixed' ? fixed : randomMinutes(min, max, () => {
-      return crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000;
-    });
-    state = { ...state, settings: { ...state.settings, fixed, min, max },
-      session: createSession(mode, duration, Date.now(), crypto.randomUUID()) };
+    const sizeCm = mode === 'random' ? validateIceSize(sizeInput.value) : state.settings.sizeCm;
+    const temperatureC = mode === 'random' ? validateTemperature(temperatureInput.value) : state.settings.temperatureC;
+    const now = Date.now(), id = crypto.randomUUID();
+    const session = mode === 'fixed' ? createSession('fixed', fixed, now, id)
+      : createIceSession({ sizeCm, temperatureC }, now, id, () => crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000);
+    state = { ...state, settings: { ...state.settings, fixed, sizeCm, temperatureC }, session };
     element('form-error').hidden = true;
+    [fixedInput, sizeInput, temperatureInput].forEach(input => input.removeAttribute('aria-invalid'));
     element('sound-notice').hidden = true;
     if (state.settings.sound) void sound.prepare();
     persist();
@@ -145,14 +159,16 @@ form.addEventListener('submit', event => {
   } catch (error) {
     element('form-error').textContent = error instanceof Error ? error.message : '시간을 다시 확인해 주세요.';
     element('form-error').hidden = false;
-    const inputs = state.settings.mode === 'fixed' ? [fixedInput] : [minInput, maxInput];
+    const inputs = state.settings.mode === 'fixed' ? [fixedInput] : [sizeInput, temperatureInput];
     inputs.forEach(input => input.setAttribute('aria-invalid', 'true'));
     inputs[0].focus();
   }
 });
 
-element('mode-fixed').addEventListener('click', () => { setMode('fixed'); persist(); });
-element('mode-random').addEventListener('click', () => { setMode('random'); persist(); });
+element('mode-fixed').addEventListener('click', () => { setMode('fixed'); persist(); render(); });
+element('mode-random').addEventListener('click', () => { setMode('random'); persist(); render(); });
+sizeInput.addEventListener('input', () => render());
+temperatureInput.addEventListener('input', () => render());
 element('pause-session').addEventListener('click', () => {
   if (!state.session) return;
   if (state.settings.sound) void sound.prepare();
@@ -204,6 +220,12 @@ function renderHistory() {
     date.dateTime = new Date(record.startedAt).toISOString();
     date.textContent = dateFormatter.format(record.startedAt);
     meta.append(mode, date);
+    if (record.ice) {
+      const conditions = document.createElement('span');
+      conditions.className = 'record-date';
+      conditions.textContent = `얼음 ${record.ice.sizeCm}cm · 주변 ${record.ice.temperatureC}°C`;
+      meta.append(conditions);
+    }
     const result = document.createElement('div');
     result.className = 'record-result';
     const duration = document.createElement('span');
