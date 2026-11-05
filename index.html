@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#10191e" />
+    <meta name="description" content="얼음 한 조각이 녹는 동안, 눈앞의 공부에 집중하세요. 시간 지정과 랜덤 챌린지, 나만의 공부 기록." />
+    <title>얼음이 녹을 때까지 — 나만의 집중 시간</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <a class="skip-link" href="#study">공부 화면으로 건너뛰기</a>
+    <div class="app-shell">
+      <header class="site-header">
+        <a class="wordmark" href="./" aria-label="얼음이 녹을 때까지 홈">얼음이 녹을 때까지<span class="wordmark-dot" aria-hidden="true">.</span></a>
+        <button id="open-history" class="text-button" type="button" aria-haspopup="dialog">공부 기록 <span aria-hidden="true">↗</span></button>
+      </header>
+
+      <main id="study" tabindex="-1">
+        <div id="intro" class="intro">
+          <p class="eyebrow">나를 위한 한 조각의 시간</p>
+          <h1 id="headline">얼음이 녹을 때까지.</h1>
+          <p id="subtitle" class="subtitle">지금은, 눈앞의 한 가지에만.</p>
+        </div>
+
+        <div id="scene" class="ice-scene" role="img" aria-label="공부하는 동안 천천히 녹는 얼음">
+          <div id="scene-fallback" class="scene-fallback" hidden>
+            <div class="still-puddle"></div><div class="still-ice"></div>
+            <p>3D 대신 간결한 화면으로 함께할게요.</p>
+          </div>
+        </div>
+
+        <section id="setup-panel" class="study-controls" aria-label="공부 설정">
+          <div class="mode-picker" role="group" aria-label="공부 모드">
+            <button id="mode-fixed" class="mode-button selected" type="button" aria-pressed="true">시간 지정</button>
+            <button id="mode-random" class="mode-button" type="button" aria-pressed="false">랜덤 챌린지</button>
+          </div>
+          <form id="study-form" novalidate>
+            <div id="fixed-fields" class="duration-fields">
+              <label class="duration-field" for="fixed-minutes"><span class="field-name">공부 시간</span><span class="number-line"><input id="fixed-minutes" type="number" inputmode="numeric" min="1" max="720" step="1" value="50" aria-label="공부 시간" aria-describedby="time-help form-error" /><span class="unit">분</span></span></label>
+            </div>
+            <div id="random-fields" class="duration-fields" hidden>
+              <label class="duration-field" for="min-minutes"><span class="field-name">최소 시간</span><span class="number-line"><input id="min-minutes" type="number" inputmode="numeric" min="1" max="720" step="1" value="30" aria-label="최소 시간" aria-describedby="time-help form-error" /><span class="unit">분</span></span></label>
+              <span class="range-divider" aria-hidden="true">—</span>
+              <label class="duration-field" for="max-minutes"><span class="field-name">최대 시간</span><span class="number-line"><input id="max-minutes" type="number" inputmode="numeric" min="1" max="720" step="1" value="90" aria-label="최대 시간" aria-describedby="time-help form-error" /><span class="unit">분</span></span></label>
+            </div>
+            <p id="time-help" class="input-help">1~720분 사이에서 정해 주세요.</p>
+            <p id="form-error" class="form-error" role="alert" hidden></p>
+            <button class="primary-button start-button" type="submit">집중 시작하기 <span aria-hidden="true">→</span></button>
+          </form>
+        </section>
+
+        <section id="active-panel" class="study-controls active-panel" aria-label="진행 중인 공부" hidden>
+          <p id="session-label" class="eyebrow">집중한 시간</p>
+          <p id="elapsed" class="elapsed" role="timer" aria-label="경과 공부 시간" aria-live="off">00:00:00</p>
+          <p id="session-hint" class="session-hint">얼음이 녹는 동안, 공부에 집중해요.</p>
+          <div id="session-actions" class="session-actions">
+            <button id="pause-session" class="primary-button" type="button">잠깐 쉬기</button>
+            <button id="stop-session" class="secondary-button" type="button">공부 마치기</button>
+          </div>
+          <button id="new-session" class="primary-button" type="button" hidden>새로운 집중 시작하기 <span aria-hidden="true">→</span></button>
+        </section>
+
+        <div class="sound-control">
+          <label><input id="sound-toggle" type="checkbox" /><span>완료 알림음</span></label>
+          <span id="sound-state" class="sound-state">꺼짐</span>
+        </div>
+        <p id="live-status" class="sr-only" role="status" aria-live="polite"></p>
+        <p id="sound-notice" class="notice" role="status" hidden></p>
+        <p id="storage-warning" class="notice storage-warning" role="alert" hidden></p>
+      </main>
+
+      <footer class="site-footer"><p id="footer-note">다른 탭에서도 공부 시간은 계속 흘러요.</p><p>기록은 이 브라우저에만 저장돼요.</p></footer>
+    </div>
+
+    <dialog id="history-dialog" aria-labelledby="history-title">
+      <div class="dialog-header"><div><p class="eyebrow">차곡차곡 쌓인 시간</p><h2 id="history-title">나의 공부 기록</h2></div><button id="close-history" class="text-button" type="button" aria-label="공부 기록 닫기">닫기</button></div>
+      <div class="history-summary"><span>총 공부 시간</span><strong id="total-time">0분</strong><span id="completed-count">완료한 얼음 0개</span></div>
+      <p id="empty-history" class="empty-history">아직 공부 기록이 없어요.<br /><span>첫 얼음을 녹이면 이곳에 남겨둘게요.</span></p>
+      <ol id="history-list" class="history-list"></ol>
+      <p class="history-note">브라우저 데이터를 삭제하면 기록도 지워져요.<br />로그인 없이 이 기기에서만 보관해요.</p>
+    </dialog>
+    <noscript><p class="noscript">공부 타이머를 사용하려면 JavaScript를 켜 주세요.</p></noscript>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
